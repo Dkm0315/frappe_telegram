@@ -19,4 +19,7 @@ build-backend = "flit_core.buildapi"
 [project.urls]
 Repository = "https://github.com/Dkm0315/frappe_telegram"
 
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0"
+
 [tool.bench.dev-dependencies]
