@@ -1,0 +1,22 @@
+[project]
+name = "frappe_telegram"
+authors = [
+    { name = "Leam Technology Systems", email = "info@leam.ae" }
+]
+description = "Telegram Bot Manager for Frappe"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    "python-telegram-bot==21.4",
+    "crossplane==0.5.7",
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[project.urls]
+Repository = "https://github.com/Dkm0315/frappe_telegram"
+
+[tool.bench.dev-dependencies]
