@@ -17,25 +17,25 @@ override_doctype_class = {
     "Notification": "frappe_telegram.override_doctype_class.TelegramNotification"
 }
 
-fixtures = [
-    {
-        "dt": "Role",
-        "filters": [["name", "in", ["Telegram Bot Manager", "Telegram Bot User"]]]
-    },
-    {
-        "dt": "Custom Field",
-        "filters": [["app_name", "=", "frappe_telegram"]]
-    },
-]
+# fixtures = [
+#     {
+#         "dt": "Role",
+#         "filters": [["name", "in", ["Telegram Bot Manager", "Telegram Bot User"]]]
+#     },
+#     {
+#         "dt": "Custom Field",
+#         "filters": [["app_name", "=", "frappe_telegram"]]
+#     },
+# ]
 
-telegram_bot_handler = [
-    "frappe_telegram.handlers.start.setup",
-    "frappe_telegram.handlers.auth.setup",
-]
+# telegram_bot_handler = [
+#     "frappe_telegram.handlers.start.setup",
+#      "frappe_telegram.handlers.auth.setup",
+# ]
 
-telegram_update_pre_processors = [
-    "frappe_telegram.handlers.logging.handler",
-]
+# telegram_update_pre_processors = [
+#     "frappe_telegram.handlers.logging.handler",
+# ]
 
 # Includes in <head>
 # ------------------
@@ -117,34 +117,25 @@ telegram_update_pre_processors = [
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-#     "*": {
-#         "on_update": "method",
-#         "on_cancel": "method",
-#         "on_trash": "method"
-#    }
-# }
+doc_events = {
+    "Communication": {
+        "after_insert": "frappe_telegram.handlers.helpdesk_reply.on_communication_insert"
+    },
+    "HD Ticket": {
+        "on_update": "frappe_telegram.handlers.helpdesk_reply.on_ticket_update"
+    }
+}
 
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-#     "all": [
-#         "frappe_telegram.tasks.all"
-#     ],
-#     "daily": [
-#         "frappe_telegram.tasks.daily"
-#     ],
-#     "hourly": [
-#         "frappe_telegram.tasks.hourly"
-#     ],
-#     "weekly": [
-#         "frappe_telegram.tasks.weekly"
-#     ]
-#     "monthly": [
-#         "frappe_telegram.tasks.monthly"
-#     ]
-# }
+scheduler_events = {
+    "cron": {
+        "*/1 * * * *": [
+            "frappe_telegram.jobs.poll_updates.poll_telegram_updates"
+        ]
+    }
+}
 
 # Testing
 # -------

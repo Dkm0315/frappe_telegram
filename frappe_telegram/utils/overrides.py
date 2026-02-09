@@ -1,5 +1,6 @@
 import frappe
-from telegram.ext import Dispatcher, ExtBot, Updater
+from telegram.ext import ExtBot, Updater
+from telegram.ext._updater import Dispatcher
 from frappe_telegram.handlers.logging import log_outgoing_message
 
 

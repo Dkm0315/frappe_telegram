@@ -49,14 +49,20 @@ class TelegramBot(Document):
         if not self.is_new() and not self.has_value_changed("api_token"):
             return
 
-        from telegram.ext import ExtBot
+        import requests
         try:
-            bot = ExtBot(
-                token=self.api_token
+            resp = requests.get(
+                f"https://api.telegram.org/bot{self.api_token}/getMe",
+                timeout=10,
             )
-            user = bot.get_me()
-            if not user.is_bot:
+            data = resp.json()
+            if not data.get("ok"):
+                raise Exception(data.get("description", "Invalid token"))
+            user = data["result"]
+            if not user.get("is_bot"):
                 raise Exception(frappe._("TelegramUser is not a Bot"))
-            self.username = "@" + user.username
-        except BaseException as e:
+            self.username = "@" + user["username"]
+        except requests.RequestException as e:
+            frappe.throw(msg=frappe._("Error with Bot Token: {0}").format(str(e)))
+        except Exception as e:
             frappe.throw(msg=frappe._("Error with Bot Token: {0}").format(str(e)))

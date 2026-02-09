@@ -2,11 +2,14 @@
 __version__ = '0.0.1'
 
 from telegram import (  # noqa
-  Update, Message, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+  Update, Message, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 )
-from telegram.bot import Bot  # noqa
+from telegram.constants import ParseMode  # noqa
 from telegram.ext import (  # noqa
-  Updater, CallbackContext, Handler,
+  Updater, CallbackContext,
   MessageHandler, CommandHandler, CallbackQueryHandler,
-  DispatcherHandlerStop, ConversationHandler
+  ApplicationHandlerStop, ConversationHandler
 )
+
+# Backward compatibility alias
+DispatcherHandlerStop = ApplicationHandlerStop  # noqa

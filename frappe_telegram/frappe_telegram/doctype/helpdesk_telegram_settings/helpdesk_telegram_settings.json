@@ -1,0 +1,110 @@
+{
+ "actions": [],
+ "creation": "2026-02-06 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "bot",
+  "column_break_1",
+  "ticket_template",
+  "default_ticket_type",
+  "default_agent_group",
+  "messages_section",
+  "welcome_message",
+  "ticket_created_message",
+  "internal_section",
+  "last_update_id"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "bot",
+   "fieldtype": "Link",
+   "label": "Telegram Bot",
+   "options": "Telegram Bot",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ticket_template",
+   "fieldtype": "Link",
+   "label": "Ticket Template",
+   "options": "HD Ticket Template"
+  },
+  {
+   "fieldname": "default_ticket_type",
+   "fieldtype": "Link",
+   "label": "Default Ticket Type",
+   "options": "HD Ticket Type"
+  },
+  {
+   "fieldname": "default_agent_group",
+   "fieldtype": "Link",
+   "label": "Default Agent Group",
+   "options": "HD Team"
+  },
+  {
+   "fieldname": "messages_section",
+   "fieldtype": "Section Break",
+   "label": "Messages"
+  },
+  {
+   "default": "Welcome to Support! How can I help you?",
+   "fieldname": "welcome_message",
+   "fieldtype": "Small Text",
+   "label": "Welcome Message"
+  },
+  {
+   "default": "Ticket #{{ ticket.name }} created: {{ ticket.subject }}",
+   "fieldname": "ticket_created_message",
+   "fieldtype": "Small Text",
+   "label": "Ticket Created Message"
+  },
+  {
+   "fieldname": "internal_section",
+   "fieldtype": "Section Break",
+   "label": "Internal",
+   "collapsible": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "last_update_id",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Last Update ID",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-02-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Telegram",
+ "name": "Helpdesk Telegram Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

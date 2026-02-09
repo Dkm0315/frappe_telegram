@@ -1,11 +1,11 @@
-from typing import Union
-from telegram.ext import Updater
+from typing import Union, TYPE_CHECKING
+from telegram.ext import Updater, MessageHandler
 
+if TYPE_CHECKING:
+    from telegram.ext._updater import Dispatcher
 
 import frappe
 from frappe_telegram.frappe_telegram.doctype import TelegramBot
-from telegram.ext.dispatcher import Dispatcher
-from telegram.ext.messagehandler import MessageHandler
 
 
 def start_polling(site: str, telegram_bot: Union[str, TelegramBot], poll_interval: int = 0):
@@ -75,7 +75,7 @@ def make_bot(telegram_bot: TelegramBot, site: str) -> Updater:
     return updater
 
 
-def attach_update_processors(dispatcher: Dispatcher):
+def attach_update_processors(dispatcher):
     pre_process_group = dispatcher.groups[0] - 1000
     post_process_group = dispatcher.groups[-1] + 1000
 
