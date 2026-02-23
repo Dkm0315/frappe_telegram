@@ -36,7 +36,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "State",
-   "options": "idle\nawaiting_email\ncollecting_fields"
+   "options": "idle\nawaiting_email\ncollecting_fields\nreviewing_ticket\nediting_field"
   },
   {
    "fieldname": "column_break_1",
