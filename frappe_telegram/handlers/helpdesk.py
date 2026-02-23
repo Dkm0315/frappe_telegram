@@ -275,7 +275,7 @@ def map_field_to_meta(field):
 		"Text": "str",
 		"Text Editor": "str",
 		"Select": "select",
-		"Link": "str",
+		"Link": "str",  # Will be overridden below if options fetched
 		"Int": "int",
 		"Float": "float",
 	}
@@ -286,8 +286,43 @@ def map_field_to_meta(field):
 		"required": bool(field.get("required")),
 		"prompt": field.get("placeholder") or f"Please provide {field.get('label', field.get('fieldname'))}",
 	}
+	
+	# Handle Select fields with hardcoded options
 	if field.get("fieldtype") == "Select" and field.get("options"):
 		meta["options"] = field["options"]
+		meta["type"] = "select"
+	
+	# Handle Link fields - fetch options from linked doctype
+	elif field.get("fieldtype") == "Link" and field.get("options"):
+		linked_doctype = field["options"]
+		try:
+			# Fetch records from linked doctype
+			# For HD Ticket Status, only show enabled statuses
+			filters = {}
+			if linked_doctype == "HD Ticket Status":
+				filters["enabled"] = 1
+			
+			# Get all records
+			records = frappe.get_all(
+				linked_doctype,
+				filters=filters,
+				fields=["name"],
+				order_by="name"
+			)
+			
+			if records:
+				# Convert to newline-separated options
+				options = "\n".join([r.name for r in records])
+				meta["options"] = options
+				meta["type"] = "select"
+		except Exception:
+			# If doctype doesn't exist or error fetching, log and keep as str
+			frappe.log_error(
+				f"Could not fetch options for Link field {field.get('fieldname')} "
+				f"from doctype {linked_doctype}",
+				"Telegram Helpdesk: Link field options"
+			)
+	
 	return meta
 
 
