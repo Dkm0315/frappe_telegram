@@ -60,7 +60,13 @@ def process_update(update_data, token, settings):
 		handle_email_input(text or callback_data, telegram_user, chat_id, token, settings, state)
 
 	elif state.state == "collecting_fields":
-		handle_field_input(text or callback_data, telegram_user, telegram_chat, chat_id, token, settings, state)
+		# Handle both text input and callback_data (from inline keyboard buttons)
+		# Prefer text input, fallback to callback_data for inline keyboard selections
+		input_value = text if text and text.strip() else (callback_data if callback_data else "")
+		if not input_value:
+			send_message_api(chat_id, token, "Please provide a response.")
+			return
+		handle_field_input(input_value, telegram_user, telegram_chat, chat_id, token, settings, state)
 
 	elif callback_data == "submit_ticket":
 		handle_submit_ticket(telegram_user, telegram_chat, chat_id, token, settings, state)
@@ -372,11 +378,18 @@ def ask_next_field(state, chat_id, token):
 
 def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, settings, state):
 	"""Process a user's response to a field prompt."""
+	# Ensure we have text input (handle None or empty strings)
+	if not text or not text.strip():
+		send_message_api(chat_id, token, "Please provide a valid input.")
+		return
+	
 	data = json.loads(state.collected_data or "{}")
 	fields = data.get("_fields", [])
 	idx = state.current_field_index
 
 	if idx >= len(fields):
+		# All fields collected, show review
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		return
 
 	current_field = fields[idx]
@@ -389,7 +402,8 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 		state.save(ignore_permissions=True)
 
 		if state.current_field_index >= len(fields):
-			create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, state)
+			# Show review screen instead of creating ticket directly
+			show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		else:
 			ask_next_field(state, chat_id, token)
 		return
@@ -430,7 +444,11 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 	# Check if all fields collected
 	if state.current_field_index >= len(fields):
 		# Show review screen instead of creating ticket directly
-		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		try:
+			show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		except Exception as e:
+			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: show_ticket_review error")
+			send_message_api(chat_id, token, f"Error showing review: {str(e)}. Please try again.")
 	else:
 		ask_next_field(state, chat_id, token)
 
@@ -439,41 +457,51 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 
 def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings):
 	"""Show ticket review screen with all collected fields."""
-	data = json.loads(state.collected_data or "{}")
-	fields = data.get("_fields", [])
+	try:
+		data = json.loads(state.collected_data or "{}")
+		fields = data.get("_fields", [])
 
-	# Build review message
-	review_lines = ["*TICKET REVIEW*"]
-	
-	for field in fields:
-		key = field.get("key")
-		label = field.get("label", key)
-		value = data.get(key, "")
+		if not fields:
+			send_message_api(chat_id, token, "Error: No fields found. Please start over with /start")
+			reset_conversation(state)
+			return
+
+		# Build review message
+		review_lines = ["*TICKET REVIEW*"]
 		
-		if value:
-			# Format value - handle long descriptions
-			display_value = value
-			if len(display_value) > 100:
-				display_value = display_value[:100] + "..."
-			review_lines.append(f"\n*{label}:* {display_value}")
-		else:
-			review_lines.append(f"\n*{label}:* None")
+		for field in fields:
+			key = field.get("key")
+			label = field.get("label", key)
+			value = data.get(key, "")
+			
+			if value:
+				# Format value - handle long descriptions
+				display_value = value
+				if len(display_value) > 100:
+					display_value = display_value[:100] + "..."
+				review_lines.append(f"\n*{label}:* {display_value}")
+			else:
+				review_lines.append(f"\n*{label}:* None")
 
-	review_message = "\n".join(review_lines)
+		review_message = "\n".join(review_lines)
 
-	# Create inline keyboard with Submit, Edit, Cancel buttons
-	keyboard = {
-		"inline_keyboard": [
-			[{"text": "✔ Submit", "callback_data": "submit_ticket"}],
-			[{"text": "Edit", "callback_data": "edit_ticket"}],
-			[{"text": "X Cancel", "callback_data": "cancel_ticket"}],
-		]
-	}
+		# Create inline keyboard with Submit, Edit, Cancel buttons
+		keyboard = {
+			"inline_keyboard": [
+				[{"text": "✔ Submit", "callback_data": "submit_ticket"}],
+				[{"text": "Edit", "callback_data": "edit_ticket"}],
+				[{"text": "X Cancel", "callback_data": "cancel_ticket"}],
+			]
+		}
 
-	state.state = "reviewing_ticket"
-	state.save(ignore_permissions=True)
-	
-	send_message_api(chat_id, token, review_message, reply_markup=keyboard, parse_mode="Markdown")
+		state.state = "reviewing_ticket"
+		state.save(ignore_permissions=True)
+		
+		send_message_api(chat_id, token, review_message, reply_markup=keyboard, parse_mode="Markdown")
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: show_ticket_review error")
+		send_message_api(chat_id, token, f"Error preparing review: {str(e)}. Please try again.")
+		return
 
 
 def show_edit_field_menu(state, chat_id, token):
@@ -606,8 +634,12 @@ def handle_editing_field_input(text, telegram_user, telegram_chat, chat_id, toke
 
 def handle_submit_ticket(telegram_user, telegram_chat, chat_id, token, settings, state):
 	"""Submit the ticket after review."""
-	data = json.loads(state.collected_data or "{}")
-	create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, state)
+	try:
+		data = json.loads(state.collected_data or "{}")
+		create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, state)
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: submit_ticket error")
+		send_message_api(chat_id, token, f"Error submitting ticket: {str(e)}. Please try again.")
 
 
 # --- Ticket creation ---
@@ -648,9 +680,10 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 		ticket_doc = frappe.get_doc(ticket_values)
 		ticket_doc.insert(ignore_permissions=True)
 		frappe.db.commit()
-	except Exception:
+	except Exception as e:
+		error_msg = str(e)
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: ticket creation")
-		send_message_api(chat_id, token, "Sorry, there was an error creating your ticket. Please try again.")
+		send_message_api(chat_id, token, f"Sorry, there was an error creating your ticket: {error_msg[:200]}. Please try again.")
 		reset_conversation(state)
 		return
 
