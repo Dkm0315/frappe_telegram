@@ -62,6 +62,27 @@ def process_update(update_data, token, settings):
 	elif state.state == "collecting_fields":
 		handle_field_input(text or callback_data, telegram_user, telegram_chat, chat_id, token, settings, state)
 
+	elif callback_data == "submit_ticket":
+		handle_submit_ticket(telegram_user, telegram_chat, chat_id, token, settings, state)
+
+	elif callback_data == "cancel_ticket":
+		reset_conversation(state)
+		send_message_api(chat_id, token, "Ticket creation cancelled. Send /start to see options.")
+
+	elif callback_data == "edit_ticket":
+		show_edit_field_menu(state, chat_id, token)
+
+	elif callback_data.startswith("edit_field_"):
+		field_key = callback_data.replace("edit_field_", "")
+		handle_edit_field(field_key, telegram_user, telegram_chat, chat_id, token, settings, state)
+
+	elif state.state == "reviewing_ticket":
+		# Handle any text input during review (shouldn't happen, but handle gracefully)
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+
+	elif state.state == "editing_field":
+		handle_editing_field_input(text or callback_data, telegram_user, telegram_chat, chat_id, token, settings, state)
+
 	else:
 		# Not in a conversation — check for follow-up to open ticket
 		handle_followup_or_prompt(text, telegram_user, telegram_chat, chat_id, token)
@@ -408,9 +429,185 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 
 	# Check if all fields collected
 	if state.current_field_index >= len(fields):
-		create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, state)
+		# Show review screen instead of creating ticket directly
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 	else:
 		ask_next_field(state, chat_id, token)
+
+
+# --- Ticket review ---
+
+def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings):
+	"""Show ticket review screen with all collected fields."""
+	data = json.loads(state.collected_data or "{}")
+	fields = data.get("_fields", [])
+
+	# Build review message
+	review_lines = ["*TICKET REVIEW*"]
+	
+	for field in fields:
+		key = field.get("key")
+		label = field.get("label", key)
+		value = data.get(key, "")
+		
+		if value:
+			# Format value - handle long descriptions
+			display_value = value
+			if len(display_value) > 100:
+				display_value = display_value[:100] + "..."
+			review_lines.append(f"\n*{label}:* {display_value}")
+		else:
+			review_lines.append(f"\n*{label}:* None")
+
+	review_message = "\n".join(review_lines)
+
+	# Create inline keyboard with Submit, Edit, Cancel buttons
+	keyboard = {
+		"inline_keyboard": [
+			[{"text": "✔ Submit", "callback_data": "submit_ticket"}],
+			[{"text": "Edit", "callback_data": "edit_ticket"}],
+			[{"text": "X Cancel", "callback_data": "cancel_ticket"}],
+		]
+	}
+
+	state.state = "reviewing_ticket"
+	state.save(ignore_permissions=True)
+	
+	send_message_api(chat_id, token, review_message, reply_markup=keyboard, parse_mode="Markdown")
+
+
+def show_edit_field_menu(state, chat_id, token):
+	"""Show menu to select which field to edit."""
+	data = json.loads(state.collected_data or "{}")
+	fields = data.get("_fields", [])
+
+	# Create buttons for each field
+	keyboard_buttons = []
+	for field in fields:
+		key = field.get("key")
+		label = field.get("label", key)
+		keyboard_buttons.append([{"text": label, "callback_data": f"edit_field_{key}"}])
+
+	keyboard = {"inline_keyboard": keyboard_buttons}
+
+	send_message_api(chat_id, token, "Which field would you like to change?", reply_markup=keyboard)
+
+
+def handle_edit_field(field_key, telegram_user, telegram_chat, chat_id, token, settings, state):
+	"""Start editing a specific field."""
+	data = json.loads(state.collected_data or "{}")
+	fields = data.get("_fields", [])
+
+	# Find the field
+	field = None
+	for f in fields:
+		if f.get("key") == field_key:
+			field = f
+			break
+
+	if not field:
+		send_message_api(chat_id, token, "Field not found. Please try again.")
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		return
+
+	# Store which field we're editing
+	state.state = "editing_field"
+	state.collected_data = json.dumps({**data, "_editing_field": field_key})
+	state.save(ignore_permissions=True)
+
+	# Show current value and ask for new value
+	current_value = data.get(field_key, "")
+	if current_value:
+		current_text = f"\n\n*Current value:* {current_value}"
+	else:
+		current_text = "\n\n*Current value:* _(not set)_"
+	
+	reply_markup = None
+	if field.get("type") == "select" and field.get("options"):
+		options = [o for o in field["options"].split("\n") if o.strip()]
+		if options:
+			keyboard = {"inline_keyboard": [[{"text": opt, "callback_data": opt}] for opt in options]}
+			reply_markup = keyboard
+
+	optional_hint = "" if field.get("required") else " (optional, send /skip to skip)"
+	prompt = f"{field['prompt']}{optional_hint}{current_text}"
+
+	send_message_api(chat_id, token, prompt, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+def handle_editing_field_input(text, telegram_user, telegram_chat, chat_id, token, settings, state):
+	"""Handle input while editing a field."""
+	data = json.loads(state.collected_data or "{}")
+	fields = data.get("_fields", [])
+	editing_field_key = data.get("_editing_field")
+
+	if not editing_field_key:
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		return
+
+	# Find the field being edited
+	field = None
+	for f in fields:
+		if f.get("key") == editing_field_key:
+			field = f
+			break
+
+	if not field:
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		return
+
+	# Handle /skip for optional fields
+	if text == "/skip" and not field.get("required"):
+		data[editing_field_key] = ""
+		data.pop("_editing_field", None)
+		state.state = "reviewing_ticket"
+		state.collected_data = json.dumps(data)
+		state.save(ignore_permissions=True)
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		return
+
+	# Validate required
+	if field.get("required") and not text.strip():
+		send_message_api(chat_id, token, "This field is required. Please try again.")
+		return
+
+	# Validate select
+	if field.get("type") == "select" and field.get("options"):
+		valid_options = [o.strip() for o in field["options"].split("\n") if o.strip()]
+		if text.strip() not in valid_options:
+			send_message_api(chat_id, token, "Please select from the options provided.")
+			return
+
+	# Validate int/float
+	if field.get("type") == "int":
+		try:
+			int(text.strip())
+		except ValueError:
+			send_message_api(chat_id, token, "Please enter a valid number.")
+			return
+
+	if field.get("type") == "float":
+		try:
+			float(text.strip())
+		except ValueError:
+			send_message_api(chat_id, token, "Please enter a valid number.")
+			return
+
+	# Update the field value
+	data[editing_field_key] = text.strip()
+	data.pop("_editing_field", None)
+	state.state = "reviewing_ticket"
+	state.collected_data = json.dumps(data)
+	state.save(ignore_permissions=True)
+
+	# Show updated review
+	show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+
+
+def handle_submit_ticket(telegram_user, telegram_chat, chat_id, token, settings, state):
+	"""Submit the ticket after review."""
+	data = json.loads(state.collected_data or "{}")
+	create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, state)
 
 
 # --- Ticket creation ---
