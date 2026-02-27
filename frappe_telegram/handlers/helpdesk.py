@@ -89,7 +89,7 @@ def process_update(update_data, token, settings):
 	elif callback_data == "attach_document":
 		handle_attach_document_start(state, chat_id, token)
 
-	elif callback_data == "done_attaching":
+	elif callback_data == "skip_to_review" or callback_data == "done_attaching":
 		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 
 	elif callback_data.startswith("edit_field_"):
@@ -416,8 +416,8 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 	idx = state.current_field_index
 
 	if idx >= len(fields):
-		# All fields collected, show review
-		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+		# All fields collected, prompt for attachments
+		prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		return
 
 	current_field = fields[idx]
@@ -430,8 +430,7 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 		state.save(ignore_permissions=True)
 
 		if state.current_field_index >= len(fields):
-			# Show review screen instead of creating ticket directly
-			show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+			prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		else:
 			ask_next_field(state, chat_id, token)
 		return
@@ -471,14 +470,32 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 
 	# Check if all fields collected
 	if state.current_field_index >= len(fields):
-		# Show review screen instead of creating ticket directly
 		try:
-			show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
+			prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		except Exception as e:
-			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: show_ticket_review error")
-			send_message_api(chat_id, token, f"Error showing review: {str(e)}. Please try again.")
+			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: prompt_attachment error")
+			send_message_api(chat_id, token, f"Error: {str(e)}. Please try again.")
 	else:
 		ask_next_field(state, chat_id, token)
+
+
+# --- Attachment prompt (before review) ---
+
+def prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, token, settings):
+	"""Ask user if they want to attach files before going to the review screen."""
+	keyboard = {
+		"inline_keyboard": [
+			[{"text": "Attach Document", "callback_data": "attach_document"}],
+			[{"text": "Skip", "callback_data": "skip_to_review"}],
+		]
+	}
+	state.state = "reviewing_ticket"
+	state.save(ignore_permissions=True)
+	send_message_api(
+		chat_id, token,
+		"Would you like to attach any files to your ticket?",
+		reply_markup=keyboard,
+	)
 
 
 # --- Ticket review ---

@@ -44,26 +44,52 @@ def on_communication_insert(doc, method):
 		msg = f"Reply on Ticket #{doc.reference_name}:\n\n{plain_text}"
 		send_message_api(chat_id, token, msg)
 
-	# Forward any attachments on this Communication
-	send_communication_attachments(doc, chat_id, token)
 
+def on_file_insert(doc, method):
+	"""Forward files attached to agent Communications to the Telegram user."""
+	if doc.attached_to_doctype != "Communication":
+		return
 
-def send_communication_attachments(doc, chat_id, token):
-	"""Send file attachments from a Communication to the Telegram chat."""
-	attachments = frappe.get_all(
-		"File",
-		filters={"attached_to_doctype": "Communication", "attached_to_name": doc.name},
-		fields=["name", "file_name", "file_url", "is_private"],
+	# Check if the Communication is a sent reply on an HD Ticket
+	comm = frappe.db.get_value(
+		"Communication",
+		doc.attached_to_name,
+		["sent_or_received", "reference_doctype", "reference_name"],
+		as_dict=True,
 	)
-	for attachment in attachments:
-		file_url = attachment.file_url
-		if not file_url or "/files/" not in file_url:
-			continue
-		file_path = frappe.get_site_path(
-			(("" if "/private/" in file_url else "/public") + file_url).strip("/")
-		)
-		if os.path.exists(file_path):
-			send_document_api(chat_id, token, file_path, attachment.file_name)
+	if not comm or comm.sent_or_received != "Sent" or comm.reference_doctype != "HD Ticket":
+		return
+
+	# Check if this ticket has a Telegram mapping
+	mapping = frappe.db.get_value(
+		"Helpdesk Telegram Ticket",
+		{"ticket": comm.reference_name, "is_open": 1},
+		"telegram_chat",
+	)
+	if not mapping:
+		return
+
+	try:
+		settings = frappe.get_cached_doc("Helpdesk Telegram Settings")
+		if not settings.enabled or not settings.bot:
+			return
+		bot_doc = frappe.get_doc("Telegram Bot", settings.bot)
+		token = bot_doc.get_password("api_token")
+	except Exception:
+		return
+
+	chat_id = frappe.db.get_value("Telegram Chat", mapping, "chat_id")
+	if not chat_id:
+		return
+
+	file_url = doc.file_url
+	if not file_url or "/files/" not in file_url:
+		return
+	file_path = frappe.get_site_path(
+		(("" if "/private/" in file_url else "/public") + file_url).strip("/")
+	)
+	if os.path.exists(file_path):
+		send_document_api(chat_id, token, file_path, doc.file_name)
 
 
 def on_ticket_update(doc, method):
