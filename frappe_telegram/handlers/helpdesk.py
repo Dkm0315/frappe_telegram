@@ -2,6 +2,7 @@ import json
 import re
 
 import frappe
+from frappe.utils.file_manager import save_file as save_file_to_disk
 
 from frappe_telegram.handlers.telegram_api import (
 	answer_callback_query,
@@ -59,7 +60,7 @@ def process_update(update_data, token, settings):
 
 	elif text == "/cancel":
 		reset_conversation(state)
-		send_message_api(chat_id, token, "Ticket creation cancelled. Send /start to see options.")
+		send_message_api(chat_id, token, "❌ Ticket creation cancelled. Send /start to see options.")
 
 	elif state.state == "awaiting_email":
 		handle_email_input(text or callback_data, telegram_user, chat_id, token, settings, state)
@@ -69,7 +70,7 @@ def process_update(update_data, token, settings):
 		# Prefer text input, fallback to callback_data for inline keyboard selections
 		input_value = text if text and text.strip() else (callback_data if callback_data else "")
 		if not input_value:
-			send_message_api(chat_id, token, "Please provide a response.")
+			send_message_api(chat_id, token, "⚠️ Please provide a response.")
 			return
 		handle_field_input(input_value, telegram_user, telegram_chat, chat_id, token, settings, state)
 
@@ -78,7 +79,7 @@ def process_update(update_data, token, settings):
 
 	elif callback_data == "cancel_ticket":
 		reset_conversation(state)
-		send_message_api(chat_id, token, "Ticket creation cancelled. Send /start to see options.")
+		send_message_api(chat_id, token, "❌ Ticket creation cancelled. Send /start to see options.")
 
 	elif callback_data.startswith("reopen_ticket_"):
 		handle_reopen_ticket(callback_data, telegram_user, chat_id, token)
@@ -212,8 +213,8 @@ def send_welcome_menu(chat_id, token, settings):
 	welcome = settings.welcome_message or "Welcome to Support! How can I help you?"
 	keyboard = {
 		"inline_keyboard": [
-			[{"text": "Create Ticket", "callback_data": "create_ticket"}],
-			[{"text": "My Tickets", "callback_data": "my_tickets"}],
+			[{"text": "🎫 Create Ticket", "callback_data": "create_ticket"}],
+			[{"text": "📋 My Tickets", "callback_data": "my_tickets"}],
 		]
 	}
 	send_message_api(chat_id, token, welcome, reply_markup=keyboard)
@@ -234,7 +235,7 @@ def handle_new_ticket(telegram_user, telegram_chat, chat_id, token, settings, st
 		state.state = "awaiting_email"
 		state.telegram_chat = telegram_chat.name
 		state.save(ignore_permissions=True)
-		send_message_api(chat_id, token, "Please share your registered email to continue.")
+		send_message_api(chat_id, token, "📧 Please share your registered email to continue.")
 
 
 def handle_email_input(text, telegram_user, chat_id, token, settings, state):
@@ -242,7 +243,7 @@ def handle_email_input(text, telegram_user, chat_id, token, settings, state):
 	if not text or not re.match(r"^.+@.+\..+$", text.strip()):
 		send_message_api(
 			chat_id, token,
-			"That doesn't look like a valid email. Please try again."
+			"⚠️ That doesn't look like a valid email. Please try again."
 		)
 		return
 
@@ -399,7 +400,7 @@ def ask_next_field(state, chat_id, token):
 			reply_markup = keyboard
 
 	optional_hint = "" if field.get("required") else " (optional, send /skip to skip)"
-	prompt = f"{field['prompt']}{optional_hint}"
+	prompt = f"📝 {field['prompt']}{optional_hint}"
 
 	send_message_api(chat_id, token, prompt, reply_markup=reply_markup)
 
@@ -408,7 +409,7 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 	"""Process a user's response to a field prompt."""
 	# Ensure we have text input (handle None or empty strings)
 	if not text or not text.strip():
-		send_message_api(chat_id, token, "Please provide a valid input.")
+		send_message_api(chat_id, token, "⚠️ Please provide a valid input.")
 		return
 	
 	data = json.loads(state.collected_data or "{}")
@@ -437,14 +438,14 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 
 	# Validate required
 	if current_field.get("required") and not text.strip():
-		send_message_api(chat_id, token, "This field is required. Please try again.")
+		send_message_api(chat_id, token, "⚠️ This field is required. Please try again.")
 		return
 
 	# Validate select
 	if current_field.get("type") == "select" and current_field.get("options"):
 		valid_options = [o.strip() for o in current_field["options"].split("\n") if o.strip()]
 		if text.strip() not in valid_options:
-			send_message_api(chat_id, token, "Please select from the options provided.")
+			send_message_api(chat_id, token, "⚠️ Please select from the options provided.")
 			return
 
 	# Validate int/float
@@ -452,14 +453,14 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 		try:
 			int(text.strip())
 		except ValueError:
-			send_message_api(chat_id, token, "Please enter a valid number.")
+			send_message_api(chat_id, token, "⚠️ Please enter a valid number.")
 			return
 
 	if current_field.get("type") == "float":
 		try:
 			float(text.strip())
 		except ValueError:
-			send_message_api(chat_id, token, "Please enter a valid number.")
+			send_message_api(chat_id, token, "⚠️ Please enter a valid number.")
 			return
 
 	# Store the value
@@ -474,7 +475,7 @@ def handle_field_input(text, telegram_user, telegram_chat, chat_id, token, setti
 			prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		except Exception as e:
 			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: prompt_attachment error")
-			send_message_api(chat_id, token, f"Error: {str(e)}. Please try again.")
+			send_message_api(chat_id, token, f"❌ Error: {str(e)}. Please try again.")
 	else:
 		ask_next_field(state, chat_id, token)
 
@@ -485,15 +486,15 @@ def prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, to
 	"""Ask user if they want to attach files before going to the review screen."""
 	keyboard = {
 		"inline_keyboard": [
-			[{"text": "Attach Document", "callback_data": "attach_document"}],
-			[{"text": "Skip", "callback_data": "skip_to_review"}],
+			[{"text": "📎 Attach Document", "callback_data": "attach_document"}],
+			[{"text": "⏭ Skip", "callback_data": "skip_to_review"}],
 		]
 	}
 	state.state = "reviewing_ticket"
 	state.save(ignore_permissions=True)
 	send_message_api(
 		chat_id, token,
-		"Would you like to attach any files to your ticket?",
+		"📎 Would you like to attach any files to your ticket?",
 		reply_markup=keyboard,
 	)
 
@@ -507,12 +508,12 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 		fields = data.get("_fields", [])
 
 		if not fields:
-			send_message_api(chat_id, token, "Error: No fields found. Please start over with /start")
+			send_message_api(chat_id, token, "❌ Error: No fields found. Please start over with /start")
 			reset_conversation(state)
 			return
 
 		# Build review message
-		review_lines = ["*TICKET REVIEW*"]
+		review_lines = ["📋 *TICKET REVIEW*"]
 		
 		for field in fields:
 			key = field.get("key")
@@ -541,13 +542,13 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 		review_message = "\n".join(review_lines)
 
 		# Create inline keyboard with Submit, Edit, Attach, Cancel buttons
-		attach_label = f"Attach Document ({len(attachments)})" if attachments else "Attach Document"
+		attach_label = f"📎 Attach Document ({len(attachments)})" if attachments else "📎 Attach Document"
 		keyboard = {
 			"inline_keyboard": [
-				[{"text": "✔ Submit", "callback_data": "submit_ticket"}],
-				[{"text": "Edit", "callback_data": "edit_ticket"}],
+				[{"text": "✅ Submit", "callback_data": "submit_ticket"}],
+				[{"text": "✏️ Edit", "callback_data": "edit_ticket"}],
 				[{"text": attach_label, "callback_data": "attach_document"}],
-				[{"text": "X Cancel", "callback_data": "cancel_ticket"}],
+				[{"text": "❌ Cancel", "callback_data": "cancel_ticket"}],
 			]
 		}
 
@@ -557,7 +558,7 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 		send_message_api(chat_id, token, review_message, reply_markup=keyboard, parse_mode="Markdown")
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: show_ticket_review error")
-		send_message_api(chat_id, token, f"Error preparing review: {str(e)}. Please try again.")
+		send_message_api(chat_id, token, f"❌ Error preparing review: {str(e)}. Please try again.")
 		return
 
 
@@ -575,7 +576,7 @@ def show_edit_field_menu(state, chat_id, token):
 
 	keyboard = {"inline_keyboard": keyboard_buttons}
 
-	send_message_api(chat_id, token, "Which field would you like to change?", reply_markup=keyboard)
+	send_message_api(chat_id, token, "✏️ Which field would you like to change?", reply_markup=keyboard)
 
 
 def handle_edit_field(field_key, telegram_user, telegram_chat, chat_id, token, settings, state):
@@ -591,7 +592,7 @@ def handle_edit_field(field_key, telegram_user, telegram_chat, chat_id, token, s
 			break
 
 	if not field:
-		send_message_api(chat_id, token, "Field not found. Please try again.")
+		send_message_api(chat_id, token, "❌ Field not found. Please try again.")
 		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 		return
 
@@ -653,14 +654,14 @@ def handle_editing_field_input(text, telegram_user, telegram_chat, chat_id, toke
 
 	# Validate required
 	if field.get("required") and not text.strip():
-		send_message_api(chat_id, token, "This field is required. Please try again.")
+		send_message_api(chat_id, token, "⚠️ This field is required. Please try again.")
 		return
 
 	# Validate select
 	if field.get("type") == "select" and field.get("options"):
 		valid_options = [o.strip() for o in field["options"].split("\n") if o.strip()]
 		if text.strip() not in valid_options:
-			send_message_api(chat_id, token, "Please select from the options provided.")
+			send_message_api(chat_id, token, "⚠️ Please select from the options provided.")
 			return
 
 	# Validate int/float
@@ -668,14 +669,14 @@ def handle_editing_field_input(text, telegram_user, telegram_chat, chat_id, toke
 		try:
 			int(text.strip())
 		except ValueError:
-			send_message_api(chat_id, token, "Please enter a valid number.")
+			send_message_api(chat_id, token, "⚠️ Please enter a valid number.")
 			return
 
 	if field.get("type") == "float":
 		try:
 			float(text.strip())
 		except ValueError:
-			send_message_api(chat_id, token, "Please enter a valid number.")
+			send_message_api(chat_id, token, "⚠️ Please enter a valid number.")
 			return
 
 	# Update the field value
@@ -702,12 +703,12 @@ def handle_attach_document_start(state, chat_id, token):
 
 	keyboard = {
 		"inline_keyboard": [
-			[{"text": "Done", "callback_data": "done_attaching"}],
+			[{"text": "✅ Done", "callback_data": "done_attaching"}],
 		]
 	}
 	send_message_api(
 		chat_id, token,
-		f"Send me a document, photo, or video to attach to your ticket.{count_msg}\n\nPress Done when finished.",
+		f"📎 Send me a document, photo, or video to attach to your ticket.{count_msg}\n\nPress Done when finished.",
 		reply_markup=keyboard,
 	)
 
@@ -733,7 +734,7 @@ def handle_attachment_upload(message, state, chat_id, token):
 		file_name = message["video"].get("file_name", "video.mp4")
 
 	if not file_id:
-		send_message_api(chat_id, token, "Please send a document, photo, or video.")
+		send_message_api(chat_id, token, "⚠️ Please send a document, photo, or video.")
 		return
 
 	# Download from Telegram
@@ -742,27 +743,21 @@ def handle_attachment_upload(message, state, chat_id, token):
 		bot_doc = frappe.get_doc("Telegram Bot", settings.bot)
 		bot_token = bot_doc.get_password("api_token")
 	except Exception:
-		send_message_api(chat_id, token, "Error: could not retrieve bot token.")
+		send_message_api(chat_id, token, "❌ Error: could not retrieve bot token.")
 		return
 
 	tg_file_path = get_file_info(file_id, bot_token)
 	if not tg_file_path:
-		send_message_api(chat_id, token, "Error retrieving file info from Telegram. Please try again.")
+		send_message_api(chat_id, token, "❌ Error retrieving file info from Telegram. Please try again.")
 		return
 
 	file_bytes = download_telegram_file(tg_file_path, bot_token)
 	if not file_bytes:
-		send_message_api(chat_id, token, "Error downloading file. Please try again.")
+		send_message_api(chat_id, token, "❌ Error downloading file. Please try again.")
 		return
 
 	# Save as a private Frappe File (unattached for now)
-	file_doc = frappe.get_doc({
-		"doctype": "File",
-		"file_name": file_name,
-		"content": file_bytes,
-		"is_private": 1,
-	})
-	file_doc.save(ignore_permissions=True)
+	file_doc = save_file_to_disk(file_name, file_bytes, "", "", is_private=1)
 	frappe.db.commit()
 
 	# Store in collected_data._attachments
@@ -775,12 +770,12 @@ def handle_attachment_upload(message, state, chat_id, token):
 
 	keyboard = {
 		"inline_keyboard": [
-			[{"text": "Done", "callback_data": "done_attaching"}],
+			[{"text": "✅ Done", "callback_data": "done_attaching"}],
 		]
 	}
 	send_message_api(
 		chat_id, token,
-		f"File '{file_name}' attached. ({len(attachments)} total)\nSend more or press Done.",
+		f"✅ File '{file_name}' attached. ({len(attachments)} total)\nSend more or press Done.",
 		reply_markup=keyboard,
 	)
 
@@ -792,7 +787,7 @@ def handle_submit_ticket(telegram_user, telegram_chat, chat_id, token, settings,
 		create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, state)
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: submit_ticket error")
-		send_message_api(chat_id, token, f"Error submitting ticket: {str(e)}. Please try again.")
+		send_message_api(chat_id, token, f"❌ Error submitting ticket: {str(e)}. Please try again.")
 
 
 # --- Ticket creation ---
@@ -836,7 +831,7 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 	except Exception as e:
 		error_msg = str(e)
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: ticket creation")
-		send_message_api(chat_id, token, f"Sorry, there was an error creating your ticket: {error_msg[:200]}. Please try again.")
+		send_message_api(chat_id, token, f"❌ Sorry, there was an error creating your ticket: {error_msg[:200]}. Please try again.")
 		reset_conversation(state)
 		return
 
@@ -868,7 +863,7 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 			{"ticket": ticket_doc},
 		)
 	except Exception:
-		msg = f"Ticket #{ticket_doc.name} created: {ticket_doc.subject}"
+		msg = f"✅ Ticket #{ticket_doc.name} created: {ticket_doc.subject}"
 
 	send_message_api(chat_id, token, msg)
 
@@ -886,7 +881,7 @@ def handle_reopen_ticket(callback_data, telegram_user, chat_id, token):
 		"name",
 	)
 	if not mapping:
-		send_message_api(chat_id, token, "Ticket not found or does not belong to you.")
+		send_message_api(chat_id, token, "❌ Ticket not found or does not belong to you.")
 		return
 
 	try:
@@ -899,11 +894,11 @@ def handle_reopen_ticket(callback_data, telegram_user, chat_id, token):
 
 		send_message_api(
 			chat_id, token,
-			f"Ticket #{ticket_name} has been reopened. You can send follow-up messages.",
+			f"🔄 Ticket #{ticket_name} has been reopened. You can send follow-up messages.",
 		)
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: reopen ticket")
-		send_message_api(chat_id, token, f"Error reopening ticket: {str(e)[:200]}")
+		send_message_api(chat_id, token, f"❌ Error reopening ticket: {str(e)[:200]}")
 
 
 # --- My Tickets ---
@@ -917,17 +912,17 @@ def handle_my_tickets(telegram_user, chat_id, token):
 	)
 
 	if not mappings:
-		send_message_api(chat_id, token, "You have no open tickets. Tap /start to create one.")
+		send_message_api(chat_id, token, "📭 You have no open tickets. Tap /start to create one.")
 		return
 
-	lines = ["Your open tickets:\n"]
+	lines = ["📋 Your open tickets:\n"]
 	for m in mappings:
 		ticket = frappe.db.get_value(
 			"HD Ticket", m.ticket,
 			["name", "subject", "status"], as_dict=True,
 		)
 		if ticket:
-			lines.append(f"#{ticket.name} - {ticket.subject} ({ticket.status})")
+			lines.append(f"🎫 #{ticket.name} - {ticket.subject} ({ticket.status})")
 
 	send_message_api(chat_id, token, "\n".join(lines))
 
@@ -968,6 +963,6 @@ def handle_followup_or_prompt(text, telegram_user, telegram_chat, chat_id, token
 			"subject": f"Re: {ticket.subject}",
 		}).insert(ignore_permissions=True)
 
-		send_message_api(chat_id, token, f"Message added to ticket #{mapping.ticket}")
+		send_message_api(chat_id, token, f"✅ Message added to ticket #{mapping.ticket}")
 	else:
-		send_message_api(chat_id, token, "No open ticket found. Send /start to see options.")
+		send_message_api(chat_id, token, "💬 No open ticket found. Send /start to see options.")

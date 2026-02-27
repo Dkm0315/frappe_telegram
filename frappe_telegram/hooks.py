@@ -125,7 +125,8 @@ doc_events = {
         "on_update": "frappe_telegram.handlers.helpdesk_reply.on_ticket_update"
     },
     "File": {
-        "after_insert": "frappe_telegram.handlers.helpdesk_reply.on_file_insert"
+        "after_insert": "frappe_telegram.handlers.helpdesk_reply.on_file_insert",
+        "on_update": "frappe_telegram.handlers.helpdesk_reply.on_file_update"
     }
 }
 

@@ -66,6 +66,19 @@ def on_file_insert(doc, method):
 	_send_file_doc(doc, chat_id, token)
 
 
+def on_file_update(doc, method):
+	"""Forward agent-attached files to Telegram when a File is linked after initial creation.
+
+	Catches files that are uploaded first (with no attached_to) and then linked
+	to a Communication or HD Ticket via update — which the after_insert hook misses.
+	"""
+	if not doc.has_value_changed("attached_to_doctype"):
+		return
+
+	# Delegate to the same logic as on_file_insert
+	on_file_insert(doc, method)
+
+
 def on_ticket_update(doc, method):
 	"""Notify Telegram user when their ticket is resolved and close the mapping."""
 	if not doc.has_value_changed("status"):
