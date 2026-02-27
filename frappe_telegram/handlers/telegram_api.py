@@ -40,6 +40,57 @@ def answer_callback_query(callback_query_id, token, text=None):
 		frappe.log_error(str(e)[:140], "Telegram Callback Error")
 
 
+def send_document_api(chat_id, token, file_path, filename, caption=None):
+	"""Send a document to a Telegram chat via Bot API."""
+	payload = {"chat_id": chat_id}
+	if caption:
+		payload["caption"] = caption
+
+	try:
+		with open(file_path, "rb") as f:
+			response = requests.post(
+				f"https://api.telegram.org/bot{token}/sendDocument",
+				data=payload,
+				files={"document": (filename, f)},
+				timeout=30,
+			)
+		response.raise_for_status()
+		return response.json()
+	except Exception as e:
+		frappe.log_error(str(e)[:140], "Telegram sendDocument Error")
+
+
+def get_file_info(file_id, token):
+	"""Get file path on Telegram servers for a given file_id."""
+	try:
+		response = requests.post(
+			f"https://api.telegram.org/bot{token}/getFile",
+			json={"file_id": file_id},
+			timeout=10,
+		)
+		response.raise_for_status()
+		data = response.json()
+		if data.get("ok"):
+			return data["result"].get("file_path")
+	except Exception as e:
+		frappe.log_error(str(e)[:140], "Telegram getFile Error")
+	return None
+
+
+def download_telegram_file(file_path, token):
+	"""Download file bytes from Telegram servers."""
+	try:
+		response = requests.get(
+			f"https://api.telegram.org/file/bot{token}/{file_path}",
+			timeout=30,
+		)
+		response.raise_for_status()
+		return response.content
+	except Exception as e:
+		frappe.log_error(str(e)[:140], "Telegram File Download Error")
+	return None
+
+
 def get_updates(token, offset=0, timeout=30):
 	"""Poll Telegram for new updates. Returns empty list on 409 (concurrent poll)."""
 	try:

@@ -3,7 +3,12 @@ import re
 
 import frappe
 
-from frappe_telegram.handlers.telegram_api import send_message_api, answer_callback_query
+from frappe_telegram.handlers.telegram_api import (
+	answer_callback_query,
+	download_telegram_file,
+	get_file_info,
+	send_message_api,
+)
 
 
 def process_update(update_data, token, settings):
@@ -75,12 +80,24 @@ def process_update(update_data, token, settings):
 		reset_conversation(state)
 		send_message_api(chat_id, token, "Ticket creation cancelled. Send /start to see options.")
 
+	elif callback_data.startswith("reopen_ticket_"):
+		handle_reopen_ticket(callback_data, telegram_user, chat_id, token)
+
 	elif callback_data == "edit_ticket":
 		show_edit_field_menu(state, chat_id, token)
+
+	elif callback_data == "attach_document":
+		handle_attach_document_start(state, chat_id, token)
+
+	elif callback_data == "done_attaching":
+		show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 
 	elif callback_data.startswith("edit_field_"):
 		field_key = callback_data.replace("edit_field_", "")
 		handle_edit_field(field_key, telegram_user, telegram_chat, chat_id, token, settings, state)
+
+	elif state.state == "awaiting_attachment":
+		handle_attachment_upload(message, state, chat_id, token)
 
 	elif state.state == "reviewing_ticket":
 		# Handle any text input during review (shouldn't happen, but handle gracefully)
@@ -170,7 +187,18 @@ def get_or_create_conversation_state(telegram_user_name, telegram_chat_name):
 
 
 def reset_conversation(state):
-	"""Reset conversation state to idle."""
+	"""Reset conversation state to idle and clean up orphaned attachments."""
+	# Delete any unattached files from a cancelled ticket creation
+	try:
+		data = json.loads(state.collected_data or "{}")
+		for file_name in data.get("_attachments", []):
+			if frappe.db.exists("File", file_name):
+				file_doc = frappe.get_doc("File", file_name)
+				if not file_doc.attached_to_doctype:
+					file_doc.delete(ignore_permissions=True)
+	except Exception:
+		pass
+
 	state.state = "idle"
 	state.collected_data = "{}"
 	state.current_field_index = 0
@@ -483,13 +511,25 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 			else:
 				review_lines.append(f"\n*{label}:* None")
 
+		# Show attachment info
+		attachments = data.get("_attachments", [])
+		if attachments:
+			filenames = []
+			for file_name in attachments:
+				fname = frappe.db.get_value("File", file_name, "file_name")
+				if fname:
+					filenames.append(fname)
+			review_lines.append(f"\n*Attachments ({len(attachments)}):* {', '.join(filenames)}")
+
 		review_message = "\n".join(review_lines)
 
-		# Create inline keyboard with Submit, Edit, Cancel buttons
+		# Create inline keyboard with Submit, Edit, Attach, Cancel buttons
+		attach_label = f"Attach Document ({len(attachments)})" if attachments else "Attach Document"
 		keyboard = {
 			"inline_keyboard": [
 				[{"text": "✔ Submit", "callback_data": "submit_ticket"}],
 				[{"text": "Edit", "callback_data": "edit_ticket"}],
+				[{"text": attach_label, "callback_data": "attach_document"}],
 				[{"text": "X Cancel", "callback_data": "cancel_ticket"}],
 			]
 		}
@@ -632,6 +672,102 @@ def handle_editing_field_input(text, telegram_user, telegram_chat, chat_id, toke
 	show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings)
 
 
+# --- Attachment handling ---
+
+def handle_attach_document_start(state, chat_id, token):
+	"""Prompt the user to send files."""
+	state.state = "awaiting_attachment"
+	state.save(ignore_permissions=True)
+
+	data = json.loads(state.collected_data or "{}")
+	count = len(data.get("_attachments", []))
+	count_msg = f"\n{count} file(s) attached so far." if count else ""
+
+	keyboard = {
+		"inline_keyboard": [
+			[{"text": "Done", "callback_data": "done_attaching"}],
+		]
+	}
+	send_message_api(
+		chat_id, token,
+		f"Send me a document, photo, or video to attach to your ticket.{count_msg}\n\nPress Done when finished.",
+		reply_markup=keyboard,
+	)
+
+
+def handle_attachment_upload(message, state, chat_id, token):
+	"""Process a file upload during the awaiting_attachment state."""
+	if not message:
+		return
+
+	# Extract file_id from document, photo, or video
+	file_id = None
+	file_name = None
+
+	if message.get("document"):
+		file_id = message["document"]["file_id"]
+		file_name = message["document"].get("file_name", "document")
+	elif message.get("photo"):
+		# Photos come as an array of sizes; pick the largest
+		file_id = message["photo"][-1]["file_id"]
+		file_name = "photo.jpg"
+	elif message.get("video"):
+		file_id = message["video"]["file_id"]
+		file_name = message["video"].get("file_name", "video.mp4")
+
+	if not file_id:
+		send_message_api(chat_id, token, "Please send a document, photo, or video.")
+		return
+
+	# Download from Telegram
+	try:
+		settings = frappe.get_cached_doc("Helpdesk Telegram Settings")
+		bot_doc = frappe.get_doc("Telegram Bot", settings.bot)
+		bot_token = bot_doc.get_password("api_token")
+	except Exception:
+		send_message_api(chat_id, token, "Error: could not retrieve bot token.")
+		return
+
+	tg_file_path = get_file_info(file_id, bot_token)
+	if not tg_file_path:
+		send_message_api(chat_id, token, "Error retrieving file info from Telegram. Please try again.")
+		return
+
+	file_bytes = download_telegram_file(tg_file_path, bot_token)
+	if not file_bytes:
+		send_message_api(chat_id, token, "Error downloading file. Please try again.")
+		return
+
+	# Save as a private Frappe File (unattached for now)
+	file_doc = frappe.get_doc({
+		"doctype": "File",
+		"file_name": file_name,
+		"content": file_bytes,
+		"is_private": 1,
+	})
+	file_doc.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	# Store in collected_data._attachments
+	data = json.loads(state.collected_data or "{}")
+	attachments = data.get("_attachments", [])
+	attachments.append(file_doc.name)
+	data["_attachments"] = attachments
+	state.collected_data = json.dumps(data)
+	state.save(ignore_permissions=True)
+
+	keyboard = {
+		"inline_keyboard": [
+			[{"text": "Done", "callback_data": "done_attaching"}],
+		]
+	}
+	send_message_api(
+		chat_id, token,
+		f"File '{file_name}' attached. ({len(attachments)} total)\nSend more or press Done.",
+		reply_markup=keyboard,
+	)
+
+
 def handle_submit_ticket(telegram_user, telegram_chat, chat_id, token, settings, state):
 	"""Submit the ticket after review."""
 	try:
@@ -687,6 +823,14 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 		reset_conversation(state)
 		return
 
+	# Link uploaded attachments to the ticket
+	for file_name in data.get("_attachments", []):
+		if frappe.db.exists("File", file_name):
+			frappe.db.set_value("File", file_name, {
+				"attached_to_doctype": "HD Ticket",
+				"attached_to_name": ticket_doc.name,
+			})
+
 	# Create mapping for two-way communication
 	frappe.get_doc({
 		"doctype": "Helpdesk Telegram Ticket",
@@ -709,6 +853,39 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 		msg = f"Ticket #{ticket_doc.name} created: {ticket_doc.subject}"
 
 	send_message_api(chat_id, token, msg)
+
+
+# --- Reopen ticket ---
+
+def handle_reopen_ticket(callback_data, telegram_user, chat_id, token):
+	"""Reopen a resolved ticket."""
+	ticket_name = callback_data.replace("reopen_ticket_", "")
+
+	# Verify ticket exists and belongs to this user
+	mapping = frappe.db.get_value(
+		"Helpdesk Telegram Ticket",
+		{"ticket": ticket_name, "telegram_user": telegram_user.name},
+		"name",
+	)
+	if not mapping:
+		send_message_api(chat_id, token, "Ticket not found or does not belong to you.")
+		return
+
+	try:
+		ticket = frappe.get_doc("HD Ticket", ticket_name)
+		ticket.status = "Open"
+		ticket.save(ignore_permissions=True)
+
+		frappe.db.set_value("Helpdesk Telegram Ticket", mapping, "is_open", 1)
+		frappe.db.commit()
+
+		send_message_api(
+			chat_id, token,
+			f"Ticket #{ticket_name} has been reopened. You can send follow-up messages.",
+		)
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: reopen ticket")
+		send_message_api(chat_id, token, f"Error reopening ticket: {str(e)[:200]}")
 
 
 # --- My Tickets ---

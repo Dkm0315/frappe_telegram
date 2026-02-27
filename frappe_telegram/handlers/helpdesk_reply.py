@@ -1,6 +1,8 @@
+import os
+
 import frappe
 
-from frappe_telegram.handlers.telegram_api import send_message_api
+from frappe_telegram.handlers.telegram_api import send_document_api, send_message_api
 
 
 def on_communication_insert(doc, method):
@@ -37,11 +39,31 @@ def on_communication_insert(doc, method):
 
 	# Strip HTML from content
 	plain_text = strip_html(doc.content or "")
-	if not plain_text.strip():
-		return
 
-	msg = f"Reply on Ticket #{doc.reference_name}:\n\n{plain_text}"
-	send_message_api(chat_id, token, msg)
+	if plain_text.strip():
+		msg = f"Reply on Ticket #{doc.reference_name}:\n\n{plain_text}"
+		send_message_api(chat_id, token, msg)
+
+	# Forward any attachments on this Communication
+	send_communication_attachments(doc, chat_id, token)
+
+
+def send_communication_attachments(doc, chat_id, token):
+	"""Send file attachments from a Communication to the Telegram chat."""
+	attachments = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": "Communication", "attached_to_name": doc.name},
+		fields=["name", "file_name", "file_url", "is_private"],
+	)
+	for attachment in attachments:
+		file_url = attachment.file_url
+		if not file_url or "/files/" not in file_url:
+			continue
+		file_path = frappe.get_site_path(
+			(("" if "/private/" in file_url else "/public") + file_url).strip("/")
+		)
+		if os.path.exists(file_path):
+			send_document_api(chat_id, token, file_path, attachment.file_name)
 
 
 def on_ticket_update(doc, method):
@@ -79,9 +101,16 @@ def on_ticket_update(doc, method):
 	if not chat_id:
 		return
 
+	keyboard = {
+		"inline_keyboard": [
+			[{"text": "Reopen Ticket", "callback_data": f"reopen_ticket_{doc.name}"}],
+			[{"text": "Create New Ticket", "callback_data": "create_ticket"}],
+		]
+	}
 	send_message_api(
 		chat_id, token,
-		f"Your ticket #{doc.name} has been resolved.\nSend /start to create a new ticket.",
+		f"Your ticket #{doc.name} has been resolved.",
+		reply_markup=keyboard,
 	)
 
 
