@@ -501,6 +501,13 @@ def prompt_attachment_or_review(state, telegram_user, telegram_chat, chat_id, to
 
 # --- Ticket review ---
 
+def _escape_markdown(text):
+	"""Escape Telegram Markdown special characters in user-provided text."""
+	for ch in ("*", "_", "`", "["):
+		text = text.replace(ch, "\\" + ch)
+	return text
+
+
 def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, settings):
 	"""Show ticket review screen with all collected fields."""
 	try:
@@ -514,20 +521,20 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 
 		# Build review message
 		review_lines = ["📋 *TICKET REVIEW*"]
-		
+
 		for field in fields:
 			key = field.get("key")
 			label = field.get("label", key)
 			value = data.get(key, "")
-			
+
 			if value:
 				# Format value - handle long descriptions
-				display_value = value
+				display_value = _escape_markdown(value)
 				if len(display_value) > 100:
 					display_value = display_value[:100] + "..."
-				review_lines.append(f"\n*{label}:* {display_value}")
+				review_lines.append(f"\n*{_escape_markdown(label)}:* {display_value}")
 			else:
-				review_lines.append(f"\n*{label}:* None")
+				review_lines.append(f"\n*{_escape_markdown(label)}:* None")
 
 		# Show attachment info
 		attachments = data.get("_attachments", [])
@@ -536,7 +543,7 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 			for file_name in attachments:
 				fname = frappe.db.get_value("File", file_name, "file_name")
 				if fname:
-					filenames.append(fname)
+					filenames.append(_escape_markdown(fname))
 			review_lines.append(f"\n*Attachments ({len(attachments)}):* {', '.join(filenames)}")
 
 		review_message = "\n".join(review_lines)
@@ -554,7 +561,7 @@ def show_ticket_review(state, telegram_user, telegram_chat, chat_id, token, sett
 
 		state.state = "reviewing_ticket"
 		state.save(ignore_permissions=True)
-		
+
 		send_message_api(chat_id, token, review_message, reply_markup=keyboard, parse_mode="Markdown")
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: show_ticket_review error")
@@ -604,7 +611,7 @@ def handle_edit_field(field_key, telegram_user, telegram_chat, chat_id, token, s
 	# Show current value and ask for new value
 	current_value = data.get(field_key, "")
 	if current_value:
-		current_text = f"\n\n*Current value:* {current_value}"
+		current_text = f"\n\n*Current value:* {_escape_markdown(current_value)}"
 	else:
 		current_text = "\n\n*Current value:* _(not set)_"
 	
