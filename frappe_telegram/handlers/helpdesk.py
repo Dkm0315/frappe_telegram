@@ -843,10 +843,11 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 	# Link uploaded attachments to the ticket
 	for file_name in data.get("_attachments", []):
 		if frappe.db.exists("File", file_name):
-			frappe.db.set_value("File", file_name, {
-				"attached_to_doctype": "HD Ticket",
-				"attached_to_name": ticket_doc.name,
-			})
+			file_doc = frappe.get_doc("File", file_name)
+			file_doc.attached_to_doctype = "HD Ticket"
+			file_doc.attached_to_name = ticket_doc.name
+			file_doc.save(ignore_permissions=True)
+	frappe.db.commit()
 
 	# Create mapping for two-way communication
 	frappe.get_doc({

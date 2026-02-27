@@ -12,30 +12,11 @@ def on_communication_insert(doc, method):
 	if doc.reference_doctype != "HD Ticket":
 		return
 
-	# Check if this ticket has a Telegram mapping
-	mapping = frappe.db.get_value(
-		"Helpdesk Telegram Ticket",
-		{"ticket": doc.reference_name, "is_open": 1},
-		["telegram_user", "telegram_chat"],
-		as_dict=True,
-	)
-	if not mapping:
+	target = _get_telegram_target_for_ticket(doc.reference_name)
+	if not target:
 		return
 
-	# Get bot token
-	try:
-		settings = frappe.get_cached_doc("Helpdesk Telegram Settings")
-		if not settings.enabled or not settings.bot:
-			return
-		bot_doc = frappe.get_doc("Telegram Bot", settings.bot)
-		token = bot_doc.get_password("api_token")
-	except Exception:
-		return
-
-	# Get chat_id
-	chat_id = frappe.db.get_value("Telegram Chat", mapping.telegram_chat, "chat_id")
-	if not chat_id:
-		return
+	chat_id, token = target
 
 	# Strip HTML from content
 	plain_text = strip_html(doc.content or "")
@@ -44,52 +25,45 @@ def on_communication_insert(doc, method):
 		msg = f"Reply on Ticket #{doc.reference_name}:\n\n{plain_text}"
 		send_message_api(chat_id, token, msg)
 
+	# Forward files already attached to this Communication (uploaded before the reply was sent)
+	_send_attached_files(doc.doctype, doc.name, chat_id, token)
+
 
 def on_file_insert(doc, method):
-	"""Forward files attached to agent Communications to the Telegram user."""
-	if doc.attached_to_doctype != "Communication":
-		return
+	"""Forward agent-attached files to the Telegram user.
 
-	# Check if the Communication is a sent reply on an HD Ticket
-	comm = frappe.db.get_value(
-		"Communication",
-		doc.attached_to_name,
-		["sent_or_received", "reference_doctype", "reference_name"],
-		as_dict=True,
-	)
-	if not comm or comm.sent_or_received != "Sent" or comm.reference_doctype != "HD Ticket":
-		return
+	Handles two cases:
+	  1. File attached to a Communication (agent reply with attachment uploaded after Communication)
+	  2. File attached directly to an HD Ticket (agent uploads from the ticket form)
+	"""
+	ticket_name = None
 
-	# Check if this ticket has a Telegram mapping
-	mapping = frappe.db.get_value(
-		"Helpdesk Telegram Ticket",
-		{"ticket": comm.reference_name, "is_open": 1},
-		"telegram_chat",
-	)
-	if not mapping:
-		return
-
-	try:
-		settings = frappe.get_cached_doc("Helpdesk Telegram Settings")
-		if not settings.enabled or not settings.bot:
+	if doc.attached_to_doctype == "Communication":
+		comm = frappe.db.get_value(
+			"Communication",
+			doc.attached_to_name,
+			["sent_or_received", "reference_doctype", "reference_name"],
+			as_dict=True,
+		)
+		if not comm or comm.sent_or_received != "Sent" or comm.reference_doctype != "HD Ticket":
 			return
-		bot_doc = frappe.get_doc("Telegram Bot", settings.bot)
-		token = bot_doc.get_password("api_token")
-	except Exception:
+		ticket_name = comm.reference_name
+
+	elif doc.attached_to_doctype == "HD Ticket":
+		ticket_name = doc.attached_to_name
+
+	else:
 		return
 
-	chat_id = frappe.db.get_value("Telegram Chat", mapping, "chat_id")
-	if not chat_id:
+	if not ticket_name:
 		return
 
-	file_url = doc.file_url
-	if not file_url or "/files/" not in file_url:
+	target = _get_telegram_target_for_ticket(ticket_name)
+	if not target:
 		return
-	file_path = frappe.get_site_path(
-		(("" if "/private/" in file_url else "/public") + file_url).strip("/")
-	)
-	if os.path.exists(file_path):
-		send_document_api(chat_id, token, file_path, doc.file_name)
+
+	chat_id, token = target
+	_send_file_doc(doc, chat_id, token)
 
 
 def on_ticket_update(doc, method):
@@ -138,6 +112,58 @@ def on_ticket_update(doc, method):
 		f"Your ticket #{doc.name} has been resolved.",
 		reply_markup=keyboard,
 	)
+
+
+# --- Helpers ---
+
+def _get_telegram_target_for_ticket(ticket_name):
+	"""Return (chat_id, token) for a Telegram-mapped ticket, or None."""
+	mapping = frappe.db.get_value(
+		"Helpdesk Telegram Ticket",
+		{"ticket": ticket_name, "is_open": 1},
+		"telegram_chat",
+	)
+	if not mapping:
+		return None
+
+	try:
+		settings = frappe.get_cached_doc("Helpdesk Telegram Settings")
+		if not settings.enabled or not settings.bot:
+			return None
+		bot_doc = frappe.get_doc("Telegram Bot", settings.bot)
+		token = bot_doc.get_password("api_token")
+	except Exception:
+		return None
+
+	chat_id = frappe.db.get_value("Telegram Chat", mapping, "chat_id")
+	if not chat_id:
+		return None
+
+	return chat_id, token
+
+
+def _send_attached_files(doctype, name, chat_id, token):
+	"""Send all file attachments on a given document to a Telegram chat."""
+	attachments = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": doctype, "attached_to_name": name},
+		fields=["name", "file_name", "file_url", "is_private"],
+	)
+	for attachment in attachments:
+		_send_file_doc(attachment, chat_id, token)
+
+
+def _send_file_doc(file_doc, chat_id, token):
+	"""Resolve a File doc's path on disk and send it to a Telegram chat."""
+	file_url = file_doc.get("file_url") if hasattr(file_doc, "get") else file_doc.file_url
+	file_name = file_doc.get("file_name") if hasattr(file_doc, "get") else file_doc.file_name
+	if not file_url or "/files/" not in file_url:
+		return
+	file_path = frappe.get_site_path(
+		(("" if "/private/" in file_url else "/public") + file_url).strip("/")
+	)
+	if os.path.exists(file_path):
+		send_document_api(chat_id, token, file_path, file_name)
 
 
 def strip_html(html_content):
