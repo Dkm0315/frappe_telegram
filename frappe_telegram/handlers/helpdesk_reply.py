@@ -29,31 +29,24 @@ def on_communication_insert(doc, method):
 def on_file_insert(doc, method):
 	"""Forward agent-attached files to the Telegram user.
 
-	Handles two cases:
-	  1. File attached to a Communication (agent reply with attachment uploaded after Communication)
-	  2. File attached directly to an HD Ticket (agent uploads from the ticket form)
+	Only handles files attached to a 'Sent' Communication referencing an HD Ticket.
+	Files attached directly to HD Ticket are ignored to prevent premature sending
+	(files are uploaded to HD Ticket during reply composition, before the agent
+	presses Send).
 	"""
-	ticket_name = None
-
-	if doc.attached_to_doctype == "Communication":
-		comm = frappe.db.get_value(
-			"Communication",
-			doc.attached_to_name,
-			["sent_or_received", "reference_doctype", "reference_name"],
-			as_dict=True,
-		)
-		if not comm or comm.sent_or_received != "Sent" or comm.reference_doctype != "HD Ticket":
-			return
-		ticket_name = comm.reference_name
-
-	elif doc.attached_to_doctype == "HD Ticket":
-		ticket_name = doc.attached_to_name
-
-	else:
+	if doc.attached_to_doctype != "Communication":
 		return
 
-	if not ticket_name:
+	comm = frappe.db.get_value(
+		"Communication",
+		doc.attached_to_name,
+		["sent_or_received", "reference_doctype", "reference_name"],
+		as_dict=True,
+	)
+	if not comm or comm.sent_or_received != "Sent" or comm.reference_doctype != "HD Ticket":
 		return
+
+	ticket_name = comm.reference_name
 
 	target = _get_telegram_target_for_ticket(ticket_name)
 	if not target:
