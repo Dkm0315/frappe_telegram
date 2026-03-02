@@ -22,8 +22,21 @@ def on_communication_insert(doc, method):
 	plain_text = strip_html(doc.content or "")
 
 	if plain_text.strip():
-		msg = f"Reply on Ticket #{doc.reference_name}:\n\n{plain_text}"
-		send_message_api(chat_id, token, msg)
+		from frappe_telegram.handlers.helpdesk_notifications import (
+			build_rich_agent_reply_message,
+			notify_agent_response,
+		)
+
+		# Rich Telegram message to user
+		msg = build_rich_agent_reply_message(doc.reference_name, plain_text)
+		send_message_api(chat_id, token, msg, parse_mode="HTML")
+
+		# Management notifications (system comment + notification log)
+		notify_agent_response(
+			doc.reference_name,
+			doc.sender or frappe.session.user,
+			plain_text,
+		)
 
 
 def on_file_insert(doc, method):
@@ -100,6 +113,16 @@ def on_ticket_update(doc, method):
 	if not chat_id:
 		return
 
+	from frappe_telegram.handlers.helpdesk_notifications import (
+		build_rich_status_resolved_message,
+		build_rich_status_reopened_message,
+		build_rich_status_update_message,
+		notify_status_change,
+	)
+
+	prev = doc.get_doc_before_save()
+	old_status = getattr(prev, "status", "Unknown") if prev else "Unknown"
+
 	status_category = doc.status_category or frappe.get_value(
 		"HD Ticket Status", doc.status, "category"
 	)
@@ -109,29 +132,25 @@ def on_ticket_update(doc, method):
 			frappe.db.set_value("Helpdesk Telegram Ticket", mapping.name, "is_open", 0)
 		keyboard = {
 			"inline_keyboard": [
-				[{"text": "Reopen Ticket", "callback_data": f"reopen_ticket_{doc.name}"}],
-				[{"text": "Create New Ticket", "callback_data": "create_ticket"}],
+				[{"text": "\u2705 Reopen Ticket", "callback_data": f"reopen_ticket_{doc.name}"}],
+				[{"text": "\U0001f3ab Create New Ticket", "callback_data": "create_ticket"}],
 			]
 		}
-		send_message_api(
-			chat_id, token,
-			f"Your ticket #{doc.name} has been resolved.",
-			reply_markup=keyboard,
-		)
+		msg = build_rich_status_resolved_message(doc.name)
+		send_message_api(chat_id, token, msg, reply_markup=keyboard, parse_mode="HTML")
 
 	elif status_category == "Open" and not mapping.is_open:
 		frappe.db.set_value("Helpdesk Telegram Ticket", mapping.name, "is_open", 1)
-		send_message_api(
-			chat_id, token,
-			f"Your ticket #{doc.name} has been reopened. You can send follow-up messages.",
-		)
+		msg = build_rich_status_reopened_message(doc.name)
+		send_message_api(chat_id, token, msg, parse_mode="HTML")
 
 	else:
 		if mapping.is_open:
-			send_message_api(
-				chat_id, token,
-				f"Your ticket #{doc.name} status has been updated to: {doc.status}",
-			)
+			msg = build_rich_status_update_message(doc.name, doc.status)
+			send_message_api(chat_id, token, msg, parse_mode="HTML")
+
+	# Management notification for all status changes
+	notify_status_change(doc.name, old_status, doc.status)
 
 
 # --- Helpers ---

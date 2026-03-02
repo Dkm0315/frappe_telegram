@@ -867,14 +867,21 @@ def create_ticket(data, telegram_user, telegram_chat, chat_id, token, settings, 
 	# Reset conversation state
 	reset_conversation(state)
 
-	# Send confirmation
+	# Management notifications
+	try:
+		from frappe_telegram.handlers.helpdesk_notifications import notify_ticket_created
+		notify_ticket_created(ticket_doc.name, telegram_user.name)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: notification error")
+
+	# Send confirmation to Telegram user
 	try:
 		msg = frappe.render_template(
 			settings.ticket_created_message or "Ticket #{{ ticket.name }} created: {{ ticket.subject }}",
 			{"ticket": ticket_doc},
 		)
 	except Exception:
-		msg = f"✅ Ticket #{ticket_doc.name} created: {ticket_doc.subject}"
+		msg = f"\u2705 Ticket #{ticket_doc.name} created: {ticket_doc.subject}"
 
 	send_message_api(chat_id, token, msg)
 
@@ -904,13 +911,19 @@ def handle_reopen_ticket(callback_data, telegram_user, chat_id, token):
 		frappe.db.set_value("Helpdesk Telegram Ticket", mapping, "is_open", 1)
 		frappe.db.commit()
 
-		send_message_api(
-			chat_id, token,
-			f"🔄 Ticket #{ticket_name} has been reopened. You can send follow-up messages.",
+		# Management notification
+		from frappe_telegram.handlers.helpdesk_notifications import (
+			notify_ticket_reopened,
+			build_rich_status_reopened_message,
 		)
+		notify_ticket_reopened(ticket_name, telegram_user.name)
+
+		# Rich Telegram message to user
+		msg = build_rich_status_reopened_message(ticket_name)
+		send_message_api(chat_id, token, msg, parse_mode="HTML")
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: reopen ticket")
-		send_message_api(chat_id, token, f"❌ Error reopening ticket: {str(e)[:200]}")
+		send_message_api(chat_id, token, f"\u274c Error reopening ticket: {str(e)[:200]}")
 
 
 # --- My Tickets ---
@@ -975,6 +988,17 @@ def handle_followup_or_prompt(text, telegram_user, telegram_chat, chat_id, token
 			"subject": f"Re: {ticket.subject}",
 		}).insert(ignore_permissions=True)
 
-		send_message_api(chat_id, token, f"✅ Message added to ticket #{mapping.ticket}")
+		# Management notifications + rich confirmation
+		try:
+			from frappe_telegram.handlers.helpdesk_notifications import (
+				notify_user_response,
+				build_rich_followup_confirmation,
+			)
+			notify_user_response(mapping.ticket, telegram_user.name, text)
+			msg = build_rich_followup_confirmation(mapping.ticket)
+			send_message_api(chat_id, token, msg, parse_mode="HTML")
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: notification error")
+			send_message_api(chat_id, token, f"\u2705 Message added to ticket #{mapping.ticket}")
 	else:
 		send_message_api(chat_id, token, "💬 No open ticket found. Send /start to see options.")

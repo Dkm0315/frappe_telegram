@@ -5,22 +5,32 @@ import frappe
 
 
 def send_message_api(chat_id, token, text, reply_markup=None, parse_mode=None):
-	"""Send a text message via Telegram Bot API."""
+	"""Send a text message via Telegram Bot API.
+
+	If parse_mode is set and the API call fails (e.g. malformed HTML),
+	retries without parse_mode so the message still reaches the user.
+	"""
 	payload = {"chat_id": chat_id, "text": text}
 	if reply_markup:
 		payload["reply_markup"] = json.dumps(reply_markup) if isinstance(reply_markup, dict) else reply_markup
 	if parse_mode:
 		payload["parse_mode"] = parse_mode
 
+	url = f"https://api.telegram.org/bot{token}/sendMessage"
 	try:
-		response = requests.post(
-			f"https://api.telegram.org/bot{token}/sendMessage",
-			json=payload,
-			timeout=10,
-		)
+		response = requests.post(url, json=payload, timeout=10)
 		response.raise_for_status()
 		return response.json()
 	except Exception as e:
+		if parse_mode:
+			# Retry without parse_mode as plain text fallback
+			payload.pop("parse_mode", None)
+			try:
+				response = requests.post(url, json=payload, timeout=10)
+				response.raise_for_status()
+				return response.json()
+			except Exception:
+				pass
 		frappe.log_error(str(e)[:140], "Telegram sendMessage Error")
 
 

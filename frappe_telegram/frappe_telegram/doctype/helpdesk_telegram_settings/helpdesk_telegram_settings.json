@@ -13,6 +13,15 @@
   "messages_section",
   "welcome_message",
   "ticket_created_message",
+  "notifications_section",
+  "enable_system_notifications",
+  "notification_recipients",
+  "column_break_notifications",
+  "notify_on_ticket_creation",
+  "notify_on_status_change",
+  "notify_on_user_response",
+  "notify_on_agent_response",
+  "notify_on_ticket_reopen",
   "internal_section",
   "last_update_id"
  ],
@@ -70,6 +79,65 @@
    "label": "Ticket Created Message"
   },
   {
+   "fieldname": "notifications_section",
+   "fieldtype": "Section Break",
+   "label": "System Notifications"
+  },
+  {
+   "default": "1",
+   "description": "Enable system notifications (comments on tickets and bell-icon alerts) for management visibility",
+   "fieldname": "enable_system_notifications",
+   "fieldtype": "Check",
+   "label": "Enable System Notifications"
+  },
+  {
+   "depends_on": "enable_system_notifications",
+   "description": "Users who will receive notification alerts in their Frappe desk bell icon",
+   "fieldname": "notification_recipients",
+   "fieldtype": "Table",
+   "label": "Notification Recipients",
+   "options": "Helpdesk Notification Recipient"
+  },
+  {
+   "fieldname": "column_break_notifications",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_system_notifications",
+   "fieldname": "notify_on_ticket_creation",
+   "fieldtype": "Check",
+   "label": "Notify on Ticket Creation"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_system_notifications",
+   "fieldname": "notify_on_status_change",
+   "fieldtype": "Check",
+   "label": "Notify on Status Change"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_system_notifications",
+   "fieldname": "notify_on_user_response",
+   "fieldtype": "Check",
+   "label": "Notify on User Response"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_system_notifications",
+   "fieldname": "notify_on_agent_response",
+   "fieldtype": "Check",
+   "label": "Notify on Agent Response"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_system_notifications",
+   "fieldname": "notify_on_ticket_reopen",
+   "fieldtype": "Check",
+   "label": "Notify on Ticket Reopen"
+  },
+  {
    "fieldname": "internal_section",
    "fieldtype": "Section Break",
    "label": "Internal",
@@ -87,7 +155,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-02-06 00:00:00.000000",
+ "modified": "2026-03-02 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Telegram",
  "name": "Helpdesk Telegram Settings",
