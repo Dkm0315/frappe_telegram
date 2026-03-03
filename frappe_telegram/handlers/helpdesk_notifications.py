@@ -106,21 +106,30 @@ def add_system_comment(ticket_name, content):
 
 
 def send_notification_log(recipients, subject, message, ticket_name):
-	"""Create Notification Log entries for each recipient (bell-icon alerts)."""
-	for user in recipients:
-		try:
-			frappe.get_doc({
-				"doctype": "Notification Log",
-				"for_user": user,
-				"from_user": "Administrator",
+	"""Create Notification Log entries for recipients via Frappe's enqueue API.
+
+	Uses enqueue_create_notification which:
+	- Runs asynchronously via frappe.enqueue (enqueue_after_commit=True)
+	- Triggers publish_realtime for the bell icon in Frappe desk
+	- Respects per-user notification settings
+	- Filters for enabled users only
+	"""
+	try:
+		from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
+
+		enqueue_create_notification(
+			recipients,
+			{
 				"subject": subject,
 				"type": "Alert",
 				"document_type": "HD Ticket",
 				"document_name": ticket_name,
+				"from_user": "Administrator",
 				"email_content": message,
-			}).insert(ignore_permissions=True)
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: notification log error")
+			},
+		)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: notification log error")
 
 
 # ── High-level notification functions ────────────────────────────────
