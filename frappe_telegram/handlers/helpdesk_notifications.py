@@ -1,10 +1,11 @@
 """
 Centralized notification system for Helpdesk Telegram integration.
 
-Provides three notification channels:
+Provides four notification channels:
 1. Rich Telegram messages to users (HTML formatted, emoji-rich)
 2. System Comments on HD Ticket (timeline audit trail)
 3. Notification Log entries for management (bell-icon alerts in Frappe desk)
+4. HD Notification entries for helpdesk frontend (bell-icon alerts in helpdesk UI)
 """
 
 import frappe
@@ -132,6 +133,22 @@ def send_notification_log(recipients, subject, message, ticket_name):
 		frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: notification log error")
 
 
+def send_hd_notification(recipients, ticket_name, message, notification_type="Mention"):
+	"""Create HD Notification entries for helpdesk frontend bell icon."""
+	for user in recipients:
+		try:
+			frappe.get_doc(frappe._dict(
+				doctype="HD Notification",
+				user_from="Administrator",
+				user_to=user,
+				notification_type=notification_type,
+				reference_ticket=ticket_name,
+				message=message,
+			)).insert(ignore_permissions=True)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Telegram Helpdesk: HD notification error")
+
+
 # ── High-level notification functions ────────────────────────────────
 
 
@@ -163,6 +180,7 @@ def notify_ticket_created(ticket_name, telegram_user_name):
 
 	subject_line = f"\U0001f3ab New Telegram Ticket #{ticket_name}: {_esc(ticket.subject)}"
 	send_notification_log(recipients, subject_line, comment, ticket_name)
+	send_hd_notification(recipients, ticket_name, comment, notification_type="Assignment")
 
 
 def notify_status_change(ticket_name, old_status, new_status):
@@ -193,6 +211,7 @@ def notify_status_change(ticket_name, old_status, new_status):
 
 	subject_line = f"\U0001f504 Ticket #{ticket_name}: {_esc(old_status)} \u2192 {_esc(new_status)}"
 	send_notification_log(recipients, subject_line, comment, ticket_name)
+	send_hd_notification(recipients, ticket_name, comment)
 
 
 def notify_ticket_reopened(ticket_name, telegram_user_name):
@@ -221,6 +240,7 @@ def notify_ticket_reopened(ticket_name, telegram_user_name):
 
 	subject_line = f"\U0001f513 Ticket #{ticket_name} REOPENED by {tg_user}"
 	send_notification_log(recipients, subject_line, comment, ticket_name)
+	send_hd_notification(recipients, ticket_name, comment)
 
 
 def notify_user_response(ticket_name, telegram_user_name, message_preview):
@@ -250,6 +270,7 @@ def notify_user_response(ticket_name, telegram_user_name, message_preview):
 
 	subject_line = f"\U0001f4ac Customer response on Ticket #{ticket_name} from {tg_user}"
 	send_notification_log(recipients, subject_line, comment, ticket_name)
+	send_hd_notification(recipients, ticket_name, comment)
 
 
 def notify_agent_response(ticket_name, agent_user, message_preview):
@@ -279,6 +300,7 @@ def notify_agent_response(ticket_name, agent_user, message_preview):
 
 	subject_line = f"\U0001f468\u200d\U0001f4bc Agent {agent_name} replied on Ticket #{ticket_name}"
 	send_notification_log(recipients, subject_line, comment, ticket_name)
+	send_hd_notification(recipients, ticket_name, comment)
 
 
 # ── Rich Telegram message builders (HTML) ────────────────────────────
