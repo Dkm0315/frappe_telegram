@@ -912,14 +912,20 @@ def handle_reopen_ticket(callback_data, telegram_user, chat_id, token):
 		frappe.db.set_value("Helpdesk Telegram Ticket", mapping, "is_open", 1)
 		frappe.db.commit()
 
-		# Management notification
+		# Management notification — enqueue after commit to avoid
+		# TimestampMismatch race condition with the ticket save above
+		frappe.enqueue(
+			method="frappe_telegram.handlers.helpdesk_notifications.notify_ticket_reopened",
+			queue="short",
+			ticket_name=ticket_name,
+			telegram_user_name=telegram_user.name,
+			enqueue_after_commit=True,
+		)
+
+		# Rich Telegram message to user (synchronous — only reads data)
 		from frappe_telegram.handlers.helpdesk_notifications import (
-			notify_ticket_reopened,
 			build_rich_status_reopened_message,
 		)
-		notify_ticket_reopened(ticket_name, telegram_user.name)
-
-		# Rich Telegram message to user
 		msg = build_rich_status_reopened_message(ticket_name)
 		send_message_api(chat_id, token, msg, parse_mode="HTML")
 	except Exception as e:
